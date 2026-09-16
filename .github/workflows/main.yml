@@ -21,3 +21,11 @@ jobs:
       run: |
         docker compose up -d
         docker compose ps
+
+    - name: Run Trivy Vulnerability Scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'config'
+        hide-progress: false
+        format: 'table'
+        exit-code: '0'
