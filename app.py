@@ -1,16 +1,15 @@
 import streamlit as st
 import duckdb
-import plotly.express as px
 
-st.set_page_config(page_title="Partitioned Lakehouse Dashboard", layout="wide")
+st.set_page_config(page_title="Lakehouse Analytics Dashboard", layout="wide")
+st.title("📊 Lakehouse Data Mart Dashboard")
 
-st.title("📊 MinIO + DuckDB Partitioned Lakehouse Dashboard")
-st.markdown("Querying **Partitioned Parquet** files directly from **MinIO S3**")
-
-@st.cache_resource
-def get_duckdb_connection():
+@st.cache_data(ttl=60)
+def load_dbt_marts():
     con = duckdb.connect()
     con.execute("INSTALL httpfs; LOAD httpfs;")
+    
+    # MinIO S3 configuration
     con.execute("""
         SET s3_endpoint='127.0.0.1:9000';
         SET s3_access_key_id='minioadmin';
@@ -18,64 +17,44 @@ def get_duckdb_connection():
         SET s3_use_ssl=false;
         SET s3_url_style='path';
     """)
-    return con
-
-con = get_duckdb_connection()
-
-@st.cache_data(ttl=5)
-def load_partitioned_data():
-    return con.execute("""
-        SELECT 
-            transaction_id,
-            customer_id,
-            product,
-            amount,
-            transaction_date,
-            year,
-            month
-        FROM 's3://warehouse/partitioned_sales/*/*/*.parquet'
-    """).df()
-
-try:
-    df = load_partitioned_data()
-
-    # Sidebar Controls
-    st.sidebar.header("🔍 Filter Data")
     
-    products = ["All"] + list(df["product"].unique())
-    selected_product = st.sidebar.selectbox("Select Product", products)
-
-    # Filter Logic
-    filtered_df = df.copy()
-    if selected_product != "All":
-        filtered_df = filtered_df[filtered_df["product"] == selected_product]
-
-    # Metrics
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Filtered Transactions", len(filtered_df))
-    col2.metric("Total Revenue", f"${filtered_df['amount'].sum():,.2f}")
-    col3.metric("Avg Transaction Value", f"${filtered_df['amount'].mean():,.2f}")
-
-    st.divider()
-
-    # Visualizations
-    c1, c2 = st.columns(2)
-
-    with c1:
-        st.subheader("Revenue Distribution")
-        fig_bar = px.bar(
-            filtered_df, 
-            x="product", 
-            y="amount", 
-            color="product", 
-            text_auto=True,
-            title="Revenue by Selected Product"
+    # Querying partitioned Parquet transformed through staging rules
+    query = """
+        WITH sales AS (
+            SELECT 
+                TRIM(product) AS product_name,
+                CAST(amount AS DOUBLE) AS amount_usd
+            FROM read_parquet('s3://warehouse/partitioned_sales/*/*/*.parquet')
         )
-        st.plotly_chart(fig_bar, use_container_width=True)
+        SELECT 
+            product_name,
+            COUNT(*) AS total_orders,
+            SUM(amount_usd) AS total_revenue,
+            AVG(amount_usd) AS avg_order_value
+        FROM sales
+        GROUP BY product_name
+        ORDER BY total_revenue DESC
+    """
+    return con.execute(query).df()
 
-    with c2:
-        st.subheader("Filtered Dataset View")
-        st.dataframe(filtered_df, use_container_width=True)
+# Load data
+df = load_dbt_marts()
 
-except Exception as e:
-    st.error(f"Error connecting to MinIO Partitioned Lakehouse: {e}")
+# Metrics Display
+col1, col2, col3 = st.columns(3)
+col1.metric("Total Revenue", f"${df['total_revenue'].sum():,.2f}")
+col2.metric("Total Orders", f"{df['total_orders'].sum():,}")
+col3.metric("Top Product", df.iloc[0]['product_name'] if not df.empty else "N/A")
+
+st.markdown("---")
+
+# Product Performance Table & Chart
+col_left, col_right = st.columns([1, 1])
+
+with col_left:
+    st.subheader("📦 Product Performance Mart (`fct_product_performance`)")
+    st.dataframe(df, use_container_width=True)
+
+with col_right:
+    st.subheader("📈 Revenue by Product")
+    st.bar_chart(data=df, x="product_name", y="total_revenue")

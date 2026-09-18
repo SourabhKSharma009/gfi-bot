@@ -11,21 +11,54 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
+      - name: Set up Python Environment
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
 
-    - name: Run Docker Compose Stack with Cache
-      run: |
-        docker compose up -d
-        docker compose ps
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
 
-    - name: Run Trivy Vulnerability Scanner
-      uses: aquasecurity/trivy-action@master
-      with:
-        scan-type: 'config'
-        hide-progress: false
-        format: 'table'
-        exit-code: '0'
+      - name: Run Docker Compose Stack with Cache
+        run: |
+          docker compose up -d
+          docker compose ps
+
+      - name: Run Trivy Vulnerability Scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          hide-progress: false
+          format: 'table'
+          exit-code: '0'
+
+      - name: Install dbt
+        run: pip install dbt-duckdb
+
+      - name: Setup dbt profile
+        run: |
+          mkdir -p ~/.dbt
+          cat <<EOF > ~/.dbt/profiles.yml
+          analytics:
+            target: dev
+            outputs:
+              dev:
+                type: duckdb
+                path: ':memory:'
+                extensions:
+                  - httpfs
+                settings:
+                  s3_endpoint: '127.0.0.1:9000'
+                  s3_access_key_id: 'minioadmin'
+                  s3_secret_access_key: 'minioadminpassword'
+                  s3_use_ssl: false
+                  s3_url_style: 'path'
+          EOF
+
+      - name: Run dbt models
+        run: |
+          cd analytics
+          dbt run
