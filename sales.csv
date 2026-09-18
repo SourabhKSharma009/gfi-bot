@@ -1,0 +1,6 @@
+﻿transaction_id,customer_id,product,amount,transaction_date
+101,C1001,Laptop,1200.50,2026-09-01
+102,C1002,Mouse,25.00,2026-09-02
+103,C1001,Keyboard,75.00,2026-09-03
+104,C1003,Monitor,300.00,2026-09-04
+105,C1002,Headphones,80.00,2026-09-05
